@@ -31,13 +31,28 @@ pip install -r requirements.txt
 ```
 
 ### 3. Run Generation
-We have prepared a wrapper script `srt2anki` that can be called from any folder:
+We have prepared a wrapper script `srt2anki` that can be called from any folder. It accepts **one or more** files, and the model is loaded only once for the whole run:
 
 ```bash
+# A single file
 ./srt2anki /path/to/your/file.srt
+
+# Several specific files
+./srt2anki lecture1.srt lecture3.srt
+
+# A subset via a shell glob
+./srt2anki lecture_*.srt
 ```
 
-**What will happen:**
+To process an **entire folder** at once, use `srt2anki-batch` (see below). Add `--context N` after the file list to override the context length for that run.
+
+By default, a file is **skipped** if its `_notes.md` and `.apkg` already exist (handy for resuming an interrupted batch). Pass `--force` to regenerate and overwrite them:
+
+```bash
+./srt2anki lecture1.srt --force
+```
+
+**What will happen (for each file):**
 1. The script automatically activates the required environment and loads the model.
 2. The model generates detailed Markdown notes and saves them to a `_notes.md` file.
 3. It automatically extracts the flashcards and saves them to a `.tsv` file.
@@ -47,24 +62,40 @@ We have prepared a wrapper script `srt2anki` that can be called from any folder:
 Language models have a strict context window limit. With the default context of 8192 (the base model's native window), this script can safely process up to ~6192 tokens of subtitles (the remaining 2000 tokens are reserved for the generated response), roughly 40-50 minutes of talking. 
 The script features an **automatic safety check**: if your `.srt` file is too large, it will instantly cancel the process and tell you exactly how many tokens it counted. If this happens, simply split your file into smaller parts (e.g., `part1.srt`, `part2.srt`) and process them separately to prevent memory crashes.
 
+### Batch Processing (Whole Folder)
+To process every `.srt` file in a directory at once, use the `srt2anki-batch` wrapper. The model is loaded **only once** and applied to all files, which is far faster than calling `srt2anki` per file:
+
+```bash
+./srt2anki-batch /path/to/folder
+```
+
+If you omit the path, it processes `.srt` files in the current directory. Each file gets its own `_notes.md`, `.tsv`, and `.apkg`. A problem with one file (missing, too long, or a generation error) is isolated — the batch continues and prints a summary at the end. The `--context` flag works here too:
+
+```bash
+./srt2anki-batch /path/to/folder --context 4096
+```
+
 ### 💡 Tip: Global Access
-To avoid typing the full path to the script every time, you can create a global `alias`. Just run **one** of these commands from the project folder, depending on your shell:
+To avoid typing the full path to the scripts every time, you can create global `alias`es. Note that `srt2anki` and `srt2anki-batch` are two separate scripts, so each needs its own alias. Just run the block for your shell from the project folder:
 
 **For Bash:**
 ```bash
 echo "alias srt2anki=\"$(realpath srt2anki)\"" >> ~/.bashrc
+echo "alias srt2anki-batch=\"$(realpath srt2anki-batch)\"" >> ~/.bashrc
 source ~/.bashrc
 ```
 
 **For Zsh (macOS default):**
 ```zsh
 echo "alias srt2anki=\"$(realpath srt2anki)\"" >> ~/.zshrc
+echo "alias srt2anki-batch=\"$(realpath srt2anki-batch)\"" >> ~/.zshrc
 source ~/.zshrc
 ```
 
 **For Fish:**
 ```fish
 echo "alias srt2anki=\"$(realpath srt2anki)\"" >> ~/.config/fish/config.fish
+echo "alias srt2anki-batch=\"$(realpath srt2anki-batch)\"" >> ~/.config/fish/config.fish
 source ~/.config/fish/config.fish
 ```
 

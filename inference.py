@@ -10,7 +10,19 @@ from unsloth import FastLanguageModel
 DEFAULT_MAX_SEQ_LENGTH = 8192
 MAX_NEW_TOKENS = 2000
 
-def generate_notes(srt_file, model, tokenizer, max_seq_length):
+def generate_notes(srt_file, model, tokenizer, max_seq_length, force=False):
+    # Strip only the extension, so a ".srt" substring elsewhere in the path
+    # (e.g. a folder named ".srtbackup") is never touched.
+    base_path, _ = os.path.splitext(srt_file)
+    output_md = base_path + "_notes.md"
+    output_apkg = base_path + ".apkg"
+
+    # Skip files that were already fully processed, unless --force is given.
+    # Checked before generation so we don't waste time re-running the model.
+    if not force and os.path.exists(output_md) and os.path.exists(output_apkg):
+        print(f"[=] Output already exists, skipping (use --force to overwrite): {srt_file}")
+        return True
+
     with open(srt_file, "r", encoding="utf-8") as f:
         srt_text = f.read()
 
@@ -44,8 +56,8 @@ def generate_notes(srt_file, model, tokenizer, max_seq_length):
         print(f"\n[-] ERROR: The file is too long! ({token_count} tokens).")
         print(f"Maximum allowed for subtitles is {max_input_tokens} tokens.")
         print("Please split your .srt file into smaller parts and try again.")
-        sys.exit(1)
-        
+        return False
+
     inputs = inputs.to("cuda")
     
     print(f"Input size: {token_count} tokens. Generating response...")
@@ -60,12 +72,8 @@ def generate_notes(srt_file, model, tokenizer, max_seq_length):
     
     import re
     import random
-    
+
     # Save the result to a Markdown file
-    output_md = srt_file.replace(".srt", "_notes.md")
-    if output_md == srt_file:
-        output_md += "_notes.md"
-        
     with open(output_md, "w", encoding="utf-8") as f:
         f.write(result)
     print(f"\n[+] Notes saved to: {output_md}")
@@ -75,15 +83,14 @@ def generate_notes(srt_file, model, tokenizer, max_seq_length):
     if tsv_match:
         tsv_content = tsv_match.group(1).strip()
         
-        output_tsv = srt_file.replace(".srt", ".tsv")
-        if output_tsv == srt_file: output_tsv += ".tsv"
+        output_tsv = base_path + ".tsv"
         with open(output_tsv, "w", encoding="utf-8") as f:
             f.write(tsv_content)
         print(f"[+] TSV table saved to: {output_tsv}")
         
         try:
             import genanki
-            deck_name = os.path.basename(srt_file).replace(".srt", "")
+            deck_name = os.path.splitext(os.path.basename(srt_file))[0]
             deck_id = random.randrange(1 << 30, 1 << 31)
             model_id = random.randrange(1 << 30, 1 << 31)
             
@@ -104,8 +111,6 @@ def generate_notes(srt_file, model, tokenizer, max_seq_length):
                     q, a = line.split('\t', 1)
                     anki_deck.add_note(genanki.Note(model=anki_model, fields=[q.strip(), a.strip()]))
                     
-            output_apkg = srt_file.replace(".srt", ".apkg")
-            if output_apkg == srt_file: output_apkg += ".apkg"
             genanki.Package(anki_deck).write_to_file(output_apkg)
             print(f"[+] Anki deck saved to: {output_apkg}")
         except ImportError:
@@ -113,17 +118,15 @@ def generate_notes(srt_file, model, tokenizer, max_seq_length):
     else:
         print("[-] TSV block not found in the generated response.")
 
+    return True
+
 def main():
     parser = argparse.ArgumentParser(description="SRT to Markdown & Anki")
-    parser.add_argument("srt_file", help="Path to the .srt file")
+    parser.add_argument("srt_files", nargs="+", help="Path(s) to one or more .srt files")
     parser.add_argument("--context", type=int, default=None, help="Override context length (max_seq_length)")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing output files instead of skipping")
     args = parser.parse_args()
-    
-    srt_file = args.srt_file
-    if not os.path.exists(srt_file):
-        print(f"File not found: {srt_file}")
-        sys.exit(1)
-        
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(script_dir, "lora_model")
 
@@ -165,8 +168,38 @@ def main():
 
     # Enable fast inference
     FastLanguageModel.for_inference(model)
-    
-    generate_notes(srt_file, model, tokenizer, max_seq_length)
+
+    # Process every file with the model loaded once. A failure on one file
+    # (missing, too long, or a runtime error) is isolated so the batch keeps going.
+    total = len(args.srt_files)
+    succeeded = 0
+    failed = []
+    for i, srt_file in enumerate(args.srt_files, start=1):
+        print("\n" + "#" * 60)
+        print(f"# [{i}/{total}] {srt_file}")
+        print("#" * 60)
+
+        if not os.path.exists(srt_file):
+            print(f"[-] File not found, skipping: {srt_file}")
+            failed.append(srt_file)
+            continue
+
+        try:
+            if generate_notes(srt_file, model, tokenizer, max_seq_length, force=args.force):
+                succeeded += 1
+            else:
+                failed.append(srt_file)
+        except Exception as e:
+            print(f"[-] Error processing {srt_file}: {e}")
+            failed.append(srt_file)
+
+    print("\n" + "=" * 60)
+    print(f"Done: {succeeded}/{total} file(s) processed successfully.")
+    if failed:
+        print(f"Failed/skipped ({len(failed)}):")
+        for f in failed:
+            print(f"  - {f}")
+    sys.exit(1 if failed else 0)
 
 if __name__ == "__main__":
     main()

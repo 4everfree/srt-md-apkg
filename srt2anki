@@ -5,13 +5,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 
 # Check if an argument was provided
 if [ -z "$1" ]; then
-    echo "Usage: srt2anki <path_to_file.srt>"
+    echo "Usage: srt2anki <file1.srt> [file2.srt ...] [--context N]"
+    echo "Tip: use shell globs to pick a subset, e.g. srt2anki lecture_*.srt"
+    echo "     to process a whole folder, use srt2anki-batch instead."
     exit 1
 fi
 
-# Get the absolute path to the target srt file
-TARGET_FILE=$(realpath "$1")
-shift
+# Leading non-flag arguments are .srt files (resolved to absolute paths).
+# Everything from the first flag onward (e.g. --context 4096) is passed through.
+files=()
+while [[ $# -gt 0 && "$1" != -* ]]; do
+    files+=("$(realpath "$1")")
+    shift
+done
+
+if [ ${#files[@]} -eq 0 ]; then
+    echo "No .srt file specified."
+    echo "Usage: srt2anki <file1.srt> [file2.srt ...] [--context N]"
+    exit 1
+fi
 
 # Check if the virtual environment exists
 if [ ! -d "$SCRIPT_DIR/.venv" ]; then
@@ -20,5 +32,6 @@ if [ ! -d "$SCRIPT_DIR/.venv" ]; then
     exit 1
 fi
 
-# Run the python script from the project's virtual environment
-"$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/inference.py" "$TARGET_FILE" "$@"
+# Run the python script from the project's virtual environment.
+# The model is loaded once and applied to every file passed in.
+"$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/inference.py" "${files[@]}" "$@"

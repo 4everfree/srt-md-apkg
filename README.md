@@ -43,6 +43,10 @@ We have prepared a wrapper script `srt2anki` that can be called from any folder:
 3. It automatically extracts the flashcards and saves them to a `.tsv` file.
 4. **It generates a ready-to-use `.apkg` deck** that you can import into Anki with a double-click!
 
+**Important Limitation (File Size):**
+Language models have a strict context window limit. This script is configured to safely process up to ~6192 tokens (roughly 20-30 KB of raw SRT text, or ~40-50 minutes of talking). 
+The script features an **automatic safety check**: if your `.srt` file is too large, it will instantly cancel the process and tell you exactly how many tokens it counted. If this happens, simply split your file into smaller parts (e.g., `part1.srt`, `part2.srt`) and process them separately to prevent memory crashes.
+
 ### 💡 Tip: Global Access
 To avoid typing the full path to the script every time, you can create a global `alias`. Just run **one** of these commands from the project folder, depending on your shell:
 
@@ -72,3 +76,26 @@ srt2anki video.srt
 
 ### Alternative Run Methods
 The `lora_model` folder contains standard HuggingFace PEFT weights. You can merge them with the base model and convert them into the GGUF format (for use with Ollama / LM Studio) using built-in Unsloth utilities if you ever need a fully standalone model file.
+
+### Advanced Configuration (Context Size)
+If you have a powerful graphics card (e.g., 16GB+ VRAM) and want to process longer subtitles without splitting them, you can increase the context limit. 
+Open the `config.json` file located in the root of the project and change the `max_seq_length` value.
+
+```json
+{
+    "max_seq_length": 16384
+}
+```
+
+**Recommended settings based on your GPU VRAM (using 4-bit quantization):**
+* **`8192` :** Uses ~8 GB VRAM. Safe for 8GB GPUs (RTX 3060/4060). Fits ~45-50 mins of video.
+* **`16384`(Default):** Uses ~10-11 GB VRAM. Fits ~1h 40m of video.
+* **`24576`:** Uses ~13-14 GB VRAM. Great maximum for 16GB GPUs. Fits ~2.5h of video.
+* **`32768`:** Uses ~15.5-16 GB VRAM. Absolute limit for 16GB GPUs (ensure no other apps are consuming VRAM). Fits ~3.5h of video.
+
+**Temporary Override via Command Line**
+You can also override the configuration for a single run by passing the `--context` argument directly in the terminal:
+```bash
+srt2anki video.srt --context 16384
+```
+If you pass this argument, it will completely ignore the value in `config.json` for that specific run.

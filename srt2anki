@@ -11,6 +11,7 @@ fi
 
 # Get the absolute path to the target srt file
 TARGET_FILE=$(realpath "$1")
+shift
 
 # Check if the virtual environment exists
 if [ ! -d "$SCRIPT_DIR/.venv" ]; then
@@ -20,4 +21,4 @@ if [ ! -d "$SCRIPT_DIR/.venv" ]; then
 fi
 
 # Run the python script from the project's virtual environment
-"$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/inference.py" "$TARGET_FILE"
+"$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/inference.py" "$TARGET_FILE" "$@"

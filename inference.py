@@ -1,29 +1,13 @@
-import torch
 import sys
 import os
+import json
+import argparse
 from unsloth import FastLanguageModel
 
-# Model settings
-max_seq_length = 8192
-dtype = None
-load_in_4bit = True
+DEFAULT_MAX_SEQ_LENGTH = 16384
+MAX_NEW_TOKENS = 2000
 
-# Path to the model folder relative to the script
-script_dir = os.path.dirname(os.path.abspath(__file__))
-model_path = os.path.join(script_dir, "lora_model")
-
-print("Loading model...")
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name = model_path, # Load our trained weights using absolute path
-    max_seq_length = max_seq_length,
-    dtype = dtype,
-    load_in_4bit = load_in_4bit,
-)
-
-# Enable fast inference
-FastLanguageModel.for_inference(model)
-
-def generate_notes(srt_file):
+def generate_notes(srt_file, model, tokenizer, max_seq_length):
     with open(srt_file, "r", encoding="utf-8") as f:
         srt_text = f.read()
 
@@ -47,10 +31,22 @@ def generate_notes(srt_file):
         tokenize=True,
         add_generation_prompt=True,
         return_tensors="pt"
-    ).to("cuda")
+    )
     
-    print("Generating response...")
-    outputs = model.generate(input_ids=inputs, max_new_tokens=2000, use_cache=True)
+    token_count = inputs.shape[1]
+    # Reserve tokens for the generated response
+    max_input_tokens = max_seq_length - MAX_NEW_TOKENS
+    
+    if token_count > max_input_tokens:
+        print(f"\n[-] ERROR: The file is too long! ({token_count} tokens).")
+        print(f"Maximum allowed for subtitles is {max_input_tokens} tokens.")
+        print("Please split your .srt file into smaller parts and try again.")
+        sys.exit(1)
+        
+    inputs = inputs.to("cuda")
+    
+    print(f"Input size: {token_count} tokens. Generating response...")
+    outputs = model.generate(input_ids=inputs, max_new_tokens=MAX_NEW_TOKENS, use_cache=True)
     
     # Decode and clean up output
     result = tokenizer.batch_decode(outputs)[0]
@@ -114,14 +110,51 @@ def generate_notes(srt_file):
     else:
         print("[-] TSV block not found in the generated response.")
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python inference.py <path_to_file.srt>")
-        sys.exit(1)
-        
-    srt_file = sys.argv[1]
+def main():
+    parser = argparse.ArgumentParser(description="SRT to Markdown & Anki")
+    parser.add_argument("srt_file", help="Path to the .srt file")
+    parser.add_argument("--context", type=int, default=None, help="Override context length (max_seq_length)")
+    args = parser.parse_args()
+    
+    srt_file = args.srt_file
     if not os.path.exists(srt_file):
         print(f"File not found: {srt_file}")
         sys.exit(1)
         
-    generate_notes(srt_file)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(script_dir, "lora_model")
+
+    # Load configuration
+    config_path = os.path.join(script_dir, "config.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+            max_seq_length = config.get("max_seq_length", DEFAULT_MAX_SEQ_LENGTH)
+    except FileNotFoundError:
+        max_seq_length = DEFAULT_MAX_SEQ_LENGTH
+
+    # Override with command line argument if provided
+    if args.context is not None:
+        max_seq_length = args.context
+
+    print(f"Using max_seq_length: {max_seq_length}")
+
+    # Model settings
+    dtype = None
+    load_in_4bit = True
+
+    print("Loading model...")
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name = model_path, # Load our trained weights using absolute path
+        max_seq_length = max_seq_length,
+        dtype = dtype,
+        load_in_4bit = load_in_4bit,
+    )
+
+    # Enable fast inference
+    FastLanguageModel.for_inference(model)
+    
+    generate_notes(srt_file, model, tokenizer, max_seq_length)
+
+if __name__ == "__main__":
+    main()

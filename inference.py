@@ -4,7 +4,10 @@ import json
 import argparse
 from unsloth import FastLanguageModel
 
-DEFAULT_MAX_SEQ_LENGTH = 16384
+# The base model (Llama-3-8B) has a native context window of 8192 tokens.
+# Going above this triggers untrained RoPE scaling and severely degrades quality,
+# so 8192 is treated as a hard ceiling (see the check in main()).
+DEFAULT_MAX_SEQ_LENGTH = 8192
 MAX_NEW_TOKENS = 2000
 
 def generate_notes(srt_file, model, tokenizer, max_seq_length):
@@ -136,6 +139,15 @@ def main():
     # Override with command line argument if provided
     if args.context is not None:
         max_seq_length = args.context
+
+    # Hard ceiling: the base model is native to 8192 tokens. Requesting more
+    # would silently degrade quality (untrained RoPE scaling), so stop
+    # immediately here — before loading the model or consuming any VRAM.
+    if max_seq_length > DEFAULT_MAX_SEQ_LENGTH:
+        print(f"\n[-] ERROR: Requested context ({max_seq_length}) exceeds the maximum of {DEFAULT_MAX_SEQ_LENGTH} tokens.")
+        print("The base model is native to 8192 tokens; going higher wrecks output quality.")
+        print("Lower the value in config.json or via --context, and split long .srt files into parts.")
+        sys.exit(1)
 
     print(f"Using max_seq_length: {max_seq_length}")
 

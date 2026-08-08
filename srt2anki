@@ -1,23 +1,23 @@
 #!/bin/bash
 
-# Получаем абсолютный путь к директории, где лежит сам этот скрипт
+# Get the absolute path to the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 
-# Проверяем, передан ли аргумент
+# Check if an argument was provided
 if [ -z "$1" ]; then
-    echo "Использование: srt2anki <путь_к_файлу.srt>"
+    echo "Usage: srt2anki <path_to_file.srt>"
     exit 1
 fi
 
-# Получаем абсолютный путь к целевому srt файлу
+# Get the absolute path to the target srt file
 TARGET_FILE=$(realpath "$1")
 
-# Проверяем, существует ли виртуальное окружение
+# Check if the virtual environment exists
 if [ ! -d "$SCRIPT_DIR/.venv" ]; then
-    echo "Виртуальное окружение не найдено в $SCRIPT_DIR/.venv"
-    echo "Пожалуйста, запустите: cd $SCRIPT_DIR && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
+    echo "Virtual environment not found in $SCRIPT_DIR/.venv"
+    echo "Please run: cd $SCRIPT_DIR && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
     exit 1
 fi
 
-# Запускаем скрипт через python из виртуального окружения проекта
+# Run the python script from the project's virtual environment
 "$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/inference.py" "$TARGET_FILE"

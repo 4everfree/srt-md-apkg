@@ -139,18 +139,22 @@ def main():
     except FileNotFoundError:
         max_seq_length = DEFAULT_MAX_SEQ_LENGTH
 
-    # Override with command line argument if provided
     if args.context is not None:
+        # Explicit --context is a deliberate "I know what I'm doing" override:
+        # it is allowed to exceed the native ceiling, but we warn about quality.
         max_seq_length = args.context
-
-    # Hard ceiling: the base model is native to 8192 tokens. Requesting more
-    # would silently degrade quality (untrained RoPE scaling), so stop
-    # immediately here — before loading the model or consuming any VRAM.
-    if max_seq_length > DEFAULT_MAX_SEQ_LENGTH:
-        print(f"\n[-] ERROR: Requested context ({max_seq_length}) exceeds the maximum of {DEFAULT_MAX_SEQ_LENGTH} tokens.")
-        print("The base model is native to 8192 tokens; going higher wrecks output quality.")
-        print("Lower the value in config.json or via --context, and split long .srt files into parts.")
-        sys.exit(1)
+        if max_seq_length > DEFAULT_MAX_SEQ_LENGTH:
+            print(f"\n[!] WARNING: --context {max_seq_length} exceeds the base model's native {DEFAULT_MAX_SEQ_LENGTH} tokens.")
+            print("    Untrained RoPE scaling kicks in above this — expect degraded notes/cards quality.")
+    else:
+        # Value came from config.json (or the default). Enforce the hard ceiling
+        # here to catch accidental misconfiguration — before loading the model
+        # or consuming any VRAM.
+        if max_seq_length > DEFAULT_MAX_SEQ_LENGTH:
+            print(f"\n[-] ERROR: config.json context ({max_seq_length}) exceeds the maximum of {DEFAULT_MAX_SEQ_LENGTH} tokens.")
+            print("The base model is native to 8192 tokens; going higher wrecks output quality.")
+            print("Lower max_seq_length in config.json, or pass --context explicitly to override on purpose.")
+            sys.exit(1)
 
     print(f"Using max_seq_length: {max_seq_length}")
 

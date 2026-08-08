@@ -109,7 +109,10 @@ srt2anki video.srt
 The `lora_model` folder contains standard HuggingFace PEFT weights. You can merge them with the base model and convert them into the GGUF format (for use with Ollama / LM Studio) using built-in Unsloth utilities if you ever need a fully standalone model file.
 
 ### Advanced Configuration (Context Size)
-The default and **maximum** context is `8192` tokens — the native window of the base Llama-3-8B model. Values above this are intentionally rejected: going higher forces untrained RoPE scaling and severely degrades the quality of the generated notes and cards. If you request more, the script stops immediately (before loading the model) and asks you to lower the value or split your file.
+The recommended context is `8192` tokens — the native window of the base Llama-3-8B model. Going higher forces untrained RoPE scaling and degrades the quality of the generated notes and cards, so the limit is enforced differently depending on where the value comes from:
+
+* **`config.json`:** values above `8192` are **rejected** — the script stops immediately (before loading the model) to catch accidental misconfiguration.
+* **`--context` flag:** treated as a deliberate override — it is **allowed** to exceed `8192`, but prints a quality warning and continues. Use this if you knowingly want to trade quality for longer context.
 
 You can **lower** the context to save VRAM (e.g. on smaller GPUs) via the `config.json` file in the project root:
 
@@ -126,7 +129,7 @@ You can **lower** the context to save VRAM (e.g. on smaller GPUs) via the `confi
 To handle longer lectures, split the `.srt` into parts (`part1.srt`, `part2.srt`, …) and process them separately.
 
 **Temporary Override via Command Line**
-You can also override the configuration for a single run by passing the `--context` argument directly in the terminal (must be `8192` or lower):
+You can also override the configuration for a single run by passing the `--context` argument directly in the terminal. Unlike `config.json`, this flag may exceed `8192` (with a quality warning) if you deliberately want a longer context:
 ```bash
 srt2anki video.srt --context 4096
 ```

@@ -222,3 +222,7 @@ __marimo__/
 
 /unsloth_compiled_cache
 /lora_model/
+/lora_model_llama31/
+lora_model.zip
+lora_model_llama31.zip
+outputs/

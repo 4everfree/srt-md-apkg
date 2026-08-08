@@ -29,8 +29,8 @@ max_seq_length = 4096 # Достаточно для субтитров и кон
 dtype = None # Автоматический выбор (Float16 для старых GPU, BFloat16 для Ampere/Hopper)
 load_in_4bit = True # Используем 4-bit квантование для экономии видеопамяти
 
-# Загружаем базовую модель (можно поменять на Llama-3-8B, Mistral и т.д.)
-model_id = "unsloth/llama-3-8b-Instruct-bnb-4bit"
+# Загружаем базовую модель (Llama-3.1-8B — нативный контекст 128k)
+model_id = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
 
 print(f"Загрузка модели {model_id}...")
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -53,8 +53,8 @@ model = FastLanguageModel.get_peft_model(
     random_state = 3407,
 )
 
-# Загружаем наш подготовленный датасет
-dataset_path = "train_dataset.jsonl"
+# Загружаем наш подготовленный датасет (комбинированный srt+txt)
+dataset_path = "train_dataset_combined.jsonl"
 print(f"Загрузка датасета {dataset_path}...")
 import json
 data_list = []
@@ -86,7 +86,7 @@ trainer = SFTTrainer(
         per_device_train_batch_size = 2,
         gradient_accumulation_steps = 4,
         warmup_steps = 5,
-        max_steps = 60, # Для тестов можно поставить 60. Для полного обучения лучше использовать num_train_epochs = 3
+        num_train_epochs = 3, # Полноценное обучение на ~106 примерах (вместо тестового max_steps)
         learning_rate = 2e-4,
         fp16 = not torch.cuda.is_bf16_supported(),
         bf16 = torch.cuda.is_bf16_supported(),
@@ -96,6 +96,11 @@ trainer = SFTTrainer(
         lr_scheduler_type = "linear",
         seed = 3407,
         output_dir = "outputs",
+        # Не сохраняем промежуточные чекпоинты: torch.save(SFTConfig) падает из-за
+        # дубликата класса в unsloth_compiled_cache. Финальный model.save_pretrained
+        # (только веса LoRA) этим путём не идёт и работает штатно.
+        save_strategy = "no",
+        report_to = "none",
     ),
 )
 
@@ -104,7 +109,8 @@ print("Запуск файнтюнинга...")
 trainer_stats = trainer.train()
 
 # Сохранение обученной модели (сохраняются только веса LoRA)
-save_path = "lora_model"
+# Новая папка, чтобы не затирать рабочий адаптер Llama-3 до валидации.
+save_path = "lora_model_llama31"
 print(f"Сохранение адаптеров модели в {save_path}...")
 model.save_pretrained(save_path)
 tokenizer.save_pretrained(save_path)

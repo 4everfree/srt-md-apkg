@@ -1,136 +1,161 @@
-# SRT to MD & Anki (Finetuned Llama-3-8B)
+# SRT to MD & Anki (Finetuned Llama-3.1-8B)
 
-This repository contains a finetuned model that automatically converts SRT subtitles into detailed Markdown notes and Anki flashcards (TSV and APKG formats).
+This repository contains a finetuned model that automatically converts SRT subtitles into detailed Markdown notes and Anki flashcards (TSV and APKG formats). The current adapter is finetuned on **Llama-3.1-8B-Instruct** (native 128k context) on a combined `srt`+`txt` dataset.
 
 > **⚠️ Important Note:** This specific LoRA adapter was finetuned exclusively on **Russian** subtitles and is designed to output Russian notes and flashcards. If you feed it English subtitles, it will likely act as a translator and output the notes in Russian.
 
-## Folder Contents:
-- `lora_model/` — Trained weights (LoRA adapters) for the Llama-3-8B-Instruct model (downloaded separately).
-- `inference.py` — Ready-to-use script for model inference.
-- `finetune.py` — Original training script used to finetune this model (for reference).
-- `train_dataset.jsonl` — The dataset used for training.
+## Folder Contents
+- `lora_model_llama31/` — Trained weights (LoRA adapter) for **Llama-3.1-8B-Instruct** (downloaded separately). `inference.py` uses this automatically if present.
+- `lora_model/` — Older adapter for the original Llama-3-8B (fallback, used only if `lora_model_llama31/` is absent).
+- `inference.py` — The inference script (all the logic lives here).
+- `srt2anki` — Wrapper to process one or more files.
+- `srt2anki-batch` — Wrapper to process every `.srt` in a folder.
+- `config.json` — Default context length.
+- `finetune.py` — Training script (Llama-3.1 base, combined dataset).
+- `build_combined_dataset.py` — Builds the combined `srt`+`txt` training set from `train_dataset.jsonl`.
+- `train_dataset.jsonl` / `train_dataset_combined.jsonl` — Source dataset / the combined (srt+txt) set used for training.
+- `srt_converter_flat` / `.c` — Standalone C tool that flattens `.srt` to plain `.txt` (its cleanup is also built into `--format txt`).
 
-## How to use the model?
+---
 
-Thanks to the automated wrapper, running the model is incredibly simple. You can generate notes, TSV tables, and ready-to-use `.apkg` decks for Anki with a single command.
+## Setup (once)
 
-### 1. Download Model Weights (lora_model)
-Since model weights take up a lot of space, they are not stored in this Git repository.
-Download the `lora_model.zip` archive from [this Google Drive link](https://drive.google.com/file/d/1wUPzqhBhXbxa65ejb-bMxPrxSIMkwMZe/view?usp=sharing) and extract it so that a `lora_model/` folder with files appears in the root of the project.
+### 1. Download Model Weights
+Model weights are not stored in Git. Download `lora_model_llama31.zip` from [this Google Drive link](https://drive.google.com/file/d/18F4d65b66jKoDkfl5pmQMK8J9_scJals/view?usp=sharing) and extract it so a `lora_model_llama31/` folder appears in the project root.
 
-### 2. Environment Setup (Install Dependencies)
-Open a terminal in the project folder and run these commands once:
+> **Note:** The old Llama-3 archive lives at [this Google Drive link](https://drive.google.com/file/d/1wUPzqhBhXbxa65ejb-bMxPrxSIMkwMZe/view?usp=sharing) and extracts to `lora_model/` (used only as a fallback if `lora_model_llama31/` is absent).
 
+### 2. Install Dependencies
 ```bash
-# Create a virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
-
-# Install all dependencies at once
 pip install -r requirements.txt
 ```
 
-### 3. Run Generation
-We have prepared a wrapper script `srt2anki` that can be called from any folder. It accepts **one or more** files, and the model is loaded only once for the whole run:
+### 3. (Optional) Global aliases
+So you can call the scripts from any folder. `srt2anki` and `srt2anki-batch` are two separate scripts, so each needs its own alias — run the block for your shell from the project folder:
 
 ```bash
-# A single file
-./srt2anki /path/to/your/file.srt
-
-# Several specific files
-./srt2anki lecture1.srt lecture3.srt
-
-# A subset via a shell glob
-./srt2anki lecture_*.srt
-```
-
-To process an **entire folder** at once, use `srt2anki-batch` (see below). Add `--context N` after the file list to override the context length for that run.
-
-By default, a file is **skipped** if its `_notes.md` and `.apkg` already exist (handy for resuming an interrupted batch). Pass `--force` to regenerate and overwrite them:
-
-```bash
-./srt2anki lecture1.srt --force
-```
-
-**What will happen (for each file):**
-1. The script automatically activates the required environment and loads the model.
-2. The model generates detailed Markdown notes and saves them to a `_notes.md` file.
-3. It automatically extracts the flashcards and saves them to a `.tsv` file.
-4. **It generates a ready-to-use `.apkg` deck** that you can import into Anki with a double-click!
-
-**Important Limitation (File Size):**
-Language models have a strict context window limit. With the default context of 8192 (the base model's native window), this script can safely process up to ~6192 tokens of subtitles (the remaining 2000 tokens are reserved for the generated response), roughly 40-50 minutes of talking. 
-The script features an **automatic safety check**: if your `.srt` file is too large, it will instantly cancel the process and tell you exactly how many tokens it counted. If this happens, simply split your file into smaller parts (e.g., `part1.srt`, `part2.srt`) and process them separately to prevent memory crashes.
-
-### Batch Processing (Whole Folder)
-To process every `.srt` file in a directory at once, use the `srt2anki-batch` wrapper. The model is loaded **only once** and applied to all files, which is far faster than calling `srt2anki` per file:
-
-```bash
-./srt2anki-batch /path/to/folder
-```
-
-If you omit the path, it processes `.srt` files in the current directory. Each file gets its own `_notes.md`, `.tsv`, and `.apkg`. A problem with one file (missing, too long, or a generation error) is isolated — the batch continues and prints a summary at the end. The `--context` flag works here too:
-
-```bash
-./srt2anki-batch /path/to/folder --context 4096
-```
-
-### 💡 Tip: Global Access
-To avoid typing the full path to the scripts every time, you can create global `alias`es. Note that `srt2anki` and `srt2anki-batch` are two separate scripts, so each needs its own alias. Just run the block for your shell from the project folder:
-
-**For Bash:**
-```bash
+# Bash
 echo "alias srt2anki=\"$(realpath srt2anki)\"" >> ~/.bashrc
 echo "alias srt2anki-batch=\"$(realpath srt2anki-batch)\"" >> ~/.bashrc
 source ~/.bashrc
-```
 
-**For Zsh (macOS default):**
-```zsh
+# Zsh
 echo "alias srt2anki=\"$(realpath srt2anki)\"" >> ~/.zshrc
 echo "alias srt2anki-batch=\"$(realpath srt2anki-batch)\"" >> ~/.zshrc
 source ~/.zshrc
-```
 
-**For Fish:**
-```fish
+# Fish
 echo "alias srt2anki=\"$(realpath srt2anki)\"" >> ~/.config/fish/config.fish
 echo "alias srt2anki-batch=\"$(realpath srt2anki-batch)\"" >> ~/.config/fish/config.fish
 source ~/.config/fish/config.fish
 ```
 
-Now you can process subtitles from any folder on your computer with a simple command:
+---
+
+## Commands
+
+There are two entry points. Both load the model **only once** per run and accept the same optional flags.
+
+| Command | Input | Use it for |
+|---------|-------|-----------|
+| `srt2anki <files...> [flags]` | one or more `.srt` files | a single file, a hand-picked list, or a shell glob |
+| `srt2anki-batch [dir] [flags]` | a directory (default: current) | every `.srt` in a folder at once |
 
 ```bash
-srt2anki video.srt
+srt2anki lecture.srt                 # one file
+srt2anki lecture1.srt lecture3.srt   # several specific files
+srt2anki lecture_*.srt               # a subset via a shell glob
+srt2anki-batch                       # all .srt in the current directory
+srt2anki-batch /path/to/folder       # all .srt in a given directory
 ```
 
-### Alternative Run Methods
-The `lora_model` folder contains standard HuggingFace PEFT weights. You can merge them with the base model and convert them into the GGUF format (for use with Ollama / LM Studio) using built-in Unsloth utilities if you ever need a fully standalone model file.
+## Parameters
 
-### Advanced Configuration (Context Size)
-The recommended context is `8192` tokens — the native window of the base Llama-3-8B model. Going higher forces untrained RoPE scaling and degrades the quality of the generated notes and cards, so the limit is enforced differently depending on where the value comes from:
+| Parameter | Values | Default | What it does |
+|-----------|--------|---------|--------------|
+| positional | file paths (`srt2anki`) or a directory (`srt2anki-batch`) | — | What to process. `srt2anki-batch` with no path uses the current directory. |
+| `--format` | `srt` \| `txt` | `srt` | **`srt`**: feeds raw subtitles; timecode-aware prompt (model can flag unclear moments as `⚠️ [... @ <TIMECODE>]`). **`txt`**: flattens the file first (removes indices, timecodes, HTML tags), giving far fewer splits, and uses a prompt that never mentions timecodes. |
+| `--context N` | integer | value from `config.json` (16384) | Overrides context length for this run only. No hard ceiling — a very large value only prints a VRAM warning; see [Context & limits](#context--limits). |
+| `--force` | flag | off | Regenerate even if outputs exist. Without it, a file whose `_notes.md` **and** `.apkg` already exist is skipped (great for resuming an interrupted batch). |
+| `--recursive`, `-r` | flag | off | **`srt2anki-batch` only.** Also scan subfolders for `.srt` files, not just the top level. |
 
-* **`config.json`:** values above `8192` are **rejected** — the script stops immediately (before loading the model) to catch accidental misconfiguration.
-* **`--context` flag:** treated as a deliberate override — it is **allowed** to exceed `8192`, but prints a quality warning and continues. Use this if you knowingly want to trade quality for longer context.
+Flags go **after** the files/directory and can be combined:
 
-You can **lower** the context to save VRAM (e.g. on smaller GPUs) via the `config.json` file in the project root:
+```bash
+srt2anki-batch /path/to/folder --format txt --force
+srt2anki lecture.srt --context 4096
+```
+
+### Running in the background & saving a log
+
+Progress is printed live (timestamped, flushed immediately), so for a quick run you can just run the command and watch the terminal. To run it detached and save a log, the syntax differs by shell — and **quote any path that contains spaces**:
+
+```bash
+# Bash / Zsh
+srt2anki-batch "/path/with spaces/folder" --format txt > run.log 2>&1 &
+tail -f run.log
+```
+
+```fish
+# Fish — use &> for "stdout+stderr to file"
+srt2anki-batch "/path/with spaces/folder" --format txt &>run.log &
+tail -f run.log
+
+# Or see it live AND save it at the same time:
+srt2anki-batch "/path/with spaces/folder" --format txt &| tee run.log
+```
+
+> By default `srt2anki-batch` scans only the **top level** of a folder. To include nested subfolders, add `--recursive` (or `-r`):
+> ```bash
+> srt2anki-batch "/path/to/course" --recursive --format txt
+> ```
+
+## Results (what you get)
+
+For each input `file.srt`, up to three files are written **next to the original** (same folder):
+
+| Output | When | Contents |
+|--------|------|----------|
+| `file_notes.md` | always | Detailed Markdown summary (H2/H3 structure). In `srt` mode may include `⚠️` timecode notes. Ends with a ` ```tsv ``` ` block of the cards. |
+| `file.tsv` | if cards were produced | Tab-separated `question<TAB>answer` pairs (no header) — import into anything. |
+| `file.apkg` | if cards were produced & `genanki` installed | Ready-to-import Anki deck — double-click to add it to Anki. |
+
+Notes on behavior:
+- **Long files are handled automatically.** If a file exceeds the token budget, it is split on subtitle boundaries into as many parts as needed; the parts are generated separately and then **merged** into a single `_notes.md` and a single `.apkg` per original file (part sections are marked `## Part N`).
+- **Reliable card generation.** To avoid missing flashcards, each part uses a three-layer strategy: (1) a `repetition_penalty` to prevent degeneration loops, (2) a deterministic greedy pass, then up to 2 sampled retries if no `tsv` block appears, and (3) a **cross-format fallback** — if a file still produces no cards, the whole file is retried in the opposite format (`srt`↔`txt`).
+- **Live progress log.** Every step is printed with a timestamp and flushed immediately (loading, per-part generation, which attempt/format is running now, saves), so you can `tail -f` a redirected log and see exactly what's happening.
+- **Batch runs are resilient.** A file that is missing, unparseable, or errors out is skipped; the rest continue, and a summary (`done: X/Y …`) is printed at the end. Exit code is non-zero if anything failed.
+
+---
+
+## Context & limits
+
+The base model (**Llama-3.1-8B**) is native to **128k tokens**, so there is **no quality cliff** from raising the context — unlike the old Llama-3 (which was capped at 8192). The real constraint is now **VRAM**: the KV cache grows ~128 KB per token.
+
+- **Default:** `16384` (set in `config.json`). Comfortable on a 16 GB GPU.
+- **No hard ceiling.** A large `--context`/`config.json` value is allowed; above ~32768 the script only prints a **VRAM warning** (CUDA out-of-memory becomes likely on 16 GB). Nothing is blocked.
+
+Edit `config.json` to change the default:
 
 ```json
 {
-    "max_seq_length": 8192
+    "max_seq_length": 16384
 }
 ```
 
-**Approximate VRAM usage (4-bit quantization):**
-* **`8192` (Default / Max):** ~8 GB VRAM. Safe for 8GB GPUs (RTX 3060/4060). Fits ~45-50 mins of video.
-* **`4096`:** ~5-6 GB VRAM. For low-VRAM GPUs; process shorter clips or split your files.
+**Approximate limits on a 16 GB GPU (4-bit weights ~6 GB):**
+- **16384 (default):** ~2 GB KV cache — comfortable.
+- **~32768:** ~4 GB KV cache — the practical maximum here.
+- **128k:** would need ~16 GB of KV cache alone — not feasible on 16 GB (the model *supports* it with more VRAM).
 
-To handle longer lectures, split the `.srt` into parts (`part1.srt`, `part2.srt`, …) and process them separately.
+Files that don't fit the current context are split and merged automatically (see above), so you rarely need to raise it.
 
-**Temporary Override via Command Line**
-You can also override the configuration for a single run by passing the `--context` argument directly in the terminal. Unlike `config.json`, this flag may exceed `8192` (with a quality warning) if you deliberately want a longer context:
-```bash
-srt2anki video.srt --context 4096
-```
-If you pass this argument, it will completely ignore the value in `config.json` for that specific run.
+---
+
+## Retraining
+The current adapter was trained with `finetune.py` on `train_dataset_combined.jsonl` (built by `build_combined_dataset.py`, which produces one `srt` and one `txt` example per source lecture — the `txt` targets have their timecode notes stripped). It saves to `lora_model_llama31/`. Note: with a small dataset the model mostly learns the **output format**; broader quality needs more source lectures.
+
+## Alternative Run Methods
+The adapter folder contains standard HuggingFace PEFT weights. You can merge them with the base model and convert to GGUF (for Ollama / LM Studio) using built-in Unsloth utilities if you ever need a fully standalone model file.

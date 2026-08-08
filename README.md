@@ -44,13 +44,14 @@ We have prepared a wrapper script `srt2anki` that can be called from any folder:
 4. **It generates a ready-to-use `.apkg` deck** that you can import into Anki with a double-click!
 
 ### 💡 Tip: Global Access
-To avoid typing the full path to the script every time, you can create a global `alias`. Add this line to the end of your `~/.bashrc` (or `~/.zshrc`) file:
+To avoid typing the full path to the script every time, you can create a global `alias`. Just run this command from the project folder to automatically add the correct absolute path to your `~/.bashrc`:
 
 ```bash
-alias srt2anki="/absolute/path/to/project/folder/srt2anki"
+echo "alias srt2anki=\"$(realpath srt2anki)\"" >> ~/.bashrc
+source ~/.bashrc
 ```
 
-After that, restart your terminal (or run `source ~/.bashrc`). Now you can process subtitles from any folder on your computer with a simple command:
+Now you can process subtitles from any folder on your computer with a simple command:
 
 ```bash
 srt2anki video.srt

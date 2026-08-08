@@ -2,6 +2,8 @@
 
 This repository contains a finetuned model that automatically converts SRT subtitles into detailed Markdown notes and Anki flashcards (TSV and APKG formats).
 
+> **⚠️ Important Note:** This specific LoRA adapter was finetuned exclusively on **Russian** subtitles and is designed to output Russian notes and flashcards. If you feed it English subtitles, it will likely act as a translator and output the notes in Russian.
+
 ## Folder Contents:
 - `lora_model/` — Trained weights (LoRA adapters) for the Llama-3-8B-Instruct model (downloaded separately).
 - `inference.py` — Ready-to-use script for model inference.
@@ -14,7 +16,7 @@ Thanks to the automated wrapper, running the model is incredibly simple. You can
 
 ### 1. Download Model Weights (lora_model)
 Since model weights take up a lot of space, they are not stored in this Git repository.
-Download the `lora_model.zip` archive from [this Google Drive link](https://drive.google.com/drive/folders/1bR9FFnJpejrOjubQIPZnqpYiPh8IOM2D?usp=drive_link) and extract it so that a `lora_model/` folder with files appears in the root of the project.
+Download the `lora_model.zip` archive from [this Google Drive link](https://drive.google.com/file/d/1wUPzqhBhXbxa65ejb-bMxPrxSIMkwMZe/view?usp=sharing) and extract it so that a `lora_model/` folder with files appears in the root of the project.
 
 ### 2. Environment Setup (Install Dependencies)
 Open a terminal in the project folder and run these commands once:

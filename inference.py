@@ -17,7 +17,7 @@ def log(msg):
 # there is no quality cliff — the practical limit is VRAM (the KV cache grows
 # ~128 KB/token). We only warn past this soft threshold; nothing is blocked.
 DEFAULT_MAX_SEQ_LENGTH = 16384
-MAX_NEW_TOKENS = 2000
+DEFAULT_MAX_NEW_TOKENS = 2000  # cap on generated tokens; override via config.json / --max-new-tokens
 VRAM_WARN_SEQ_LENGTH = 32768  # above this, OOM is likely on a 16 GB GPU
 
 
@@ -108,7 +108,7 @@ def chunk_blocks(blocks, joiner, tokenizer, srt_file, fmt, max_input_tokens):
     return chunks
 
 
-def _generate_once(content, srt_file, model, tokenizer, fmt, sample):
+def _generate_once(content, srt_file, model, tokenizer, fmt, sample, max_new_tokens):
     """One generation pass. repetition_penalty guards against degeneration loops
     (e.g. endless '* * *'); greedy is deterministic, sampling is the retry fallback."""
     inputs = tokenizer.apply_chat_template(
@@ -118,7 +118,7 @@ def _generate_once(content, srt_file, model, tokenizer, fmt, sample):
         return_tensors="pt",
     ).to("cuda")
 
-    gen_kwargs = dict(max_new_tokens=MAX_NEW_TOKENS, use_cache=True, repetition_penalty=1.15)
+    gen_kwargs = dict(max_new_tokens=max_new_tokens, use_cache=True, repetition_penalty=1.15)
     if sample:
         gen_kwargs.update(do_sample=True, temperature=0.7, top_p=0.9)
     else:
@@ -130,17 +130,17 @@ def _generate_once(content, srt_file, model, tokenizer, fmt, sample):
     return result
 
 
-def run_model_on_text(content, srt_file, model, tokenizer, fmt, retries=2):
+def run_model_on_text(content, srt_file, model, tokenizer, fmt, max_new_tokens, retries=2):
     """Generate notes for one chunk, reliably. First a deterministic greedy pass;
     if it yields no ```tsv``` card block, retry a few times with sampling to recover it."""
     log("      generating (greedy pass)...")
-    result = _generate_once(content, srt_file, model, tokenizer, fmt, sample=False)
+    result = _generate_once(content, srt_file, model, tokenizer, fmt, False, max_new_tokens)
     if split_notes_and_tsv(result)[1]:
         log("      cards found on greedy pass.")
         return result
     for attempt in range(1, retries + 1):
         log(f"      no cards yet — sampled retry {attempt}/{retries}...")
-        alt = _generate_once(content, srt_file, model, tokenizer, fmt, sample=True)
+        alt = _generate_once(content, srt_file, model, tokenizer, fmt, True, max_new_tokens)
         if split_notes_and_tsv(alt)[1]:
             log(f"      recovered cards on sampled retry {attempt}.")
             return alt
@@ -157,10 +157,10 @@ def split_notes_and_tsv(result):
     return notes_body, tsv_content
 
 
-def _process_in_format(srt_file, srt_text, model, tokenizer, max_seq_length, fmt):
+def _process_in_format(srt_file, srt_text, model, tokenizer, max_seq_length, fmt, max_new_tokens):
     """Process the whole file in one format. Returns (merged_md, combined_tsv);
     merged_md is None if the subtitles are empty/unparseable."""
-    max_input_tokens = max_seq_length - MAX_NEW_TOKENS
+    max_input_tokens = max_seq_length - max_new_tokens
     blocks, joiner = parse_blocks(srt_text, fmt)
     if not blocks:
         return None, ""
@@ -176,7 +176,7 @@ def _process_in_format(srt_file, srt_text, model, tokenizer, max_seq_length, fmt
     for i, chunk in enumerate(chunks, start=1):
         chunk_tokens = count_prompt_tokens(tokenizer, chunk, srt_file, fmt)
         log(f"  [{fmt}] part {i}/{len(chunks)} ({chunk_tokens} tokens)...")
-        result = run_model_on_text(chunk, srt_file, model, tokenizer, fmt)
+        result = run_model_on_text(chunk, srt_file, model, tokenizer, fmt, max_new_tokens)
         notes_body, tsv_content = split_notes_and_tsv(result)
         if notes_body:
             header = f"## Part {i}\n\n" if len(chunks) > 1 else ""
@@ -191,7 +191,8 @@ def _process_in_format(srt_file, srt_text, model, tokenizer, max_seq_length, fmt
     return merged_md, combined_tsv
 
 
-def generate_notes(srt_file, model, tokenizer, max_seq_length, force=False, fmt="srt"):
+def generate_notes(srt_file, model, tokenizer, max_seq_length, force=False, fmt="srt",
+                   max_new_tokens=DEFAULT_MAX_NEW_TOKENS):
     # Strip only the extension, so a ".srt" substring elsewhere in the path
     # (e.g. a folder named ".srtbackup") is never touched.
     base_path, _ = os.path.splitext(srt_file)
@@ -209,7 +210,7 @@ def generate_notes(srt_file, model, tokenizer, max_seq_length, force=False, fmt=
         srt_text = f.read()
 
     log(f"processing in '{fmt}' mode...")
-    merged_md, combined_tsv = _process_in_format(srt_file, srt_text, model, tokenizer, max_seq_length, fmt)
+    merged_md, combined_tsv = _process_in_format(srt_file, srt_text, model, tokenizer, max_seq_length, fmt, max_new_tokens)
     if merged_md is None:
         log(f"[-] empty or unparseable subtitles: {srt_file}")
         return False
@@ -219,7 +220,7 @@ def generate_notes(srt_file, model, tokenizer, max_seq_length, force=False, fmt=
     if not combined_tsv:
         opposite = "txt" if fmt == "srt" else "srt"
         log(f"[!] no cards in '{fmt}' mode — retrying whole file in '{opposite}' mode...")
-        md2, tsv2 = _process_in_format(srt_file, srt_text, model, tokenizer, max_seq_length, opposite)
+        md2, tsv2 = _process_in_format(srt_file, srt_text, model, tokenizer, max_seq_length, opposite, max_new_tokens)
         if tsv2:
             merged_md, combined_tsv = md2, tsv2
             log(f"[+] recovered cards via '{opposite}' mode.")
@@ -270,6 +271,9 @@ def main():
     parser = argparse.ArgumentParser(description="SRT to Markdown & Anki")
     parser.add_argument("srt_files", nargs="+", help="Path(s) to one or more .srt files")
     parser.add_argument("--context", type=int, default=None, help="Override context length (max_seq_length)")
+    parser.add_argument("--max-new-tokens", type=int, default=None,
+                        help="Override the cap on generated tokens per part (response length). "
+                             "Higher = more detailed but slower and eats more context budget.")
     parser.add_argument("--force", action="store_true", help="Overwrite existing output files instead of skipping")
     parser.add_argument("--format", choices=["srt", "txt"], default="srt",
                         help="Input handling: 'srt' feeds raw subtitles (timecode-aware prompt); "
@@ -290,12 +294,16 @@ def main():
         with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
             max_seq_length = config.get("max_seq_length", DEFAULT_MAX_SEQ_LENGTH)
+            max_new_tokens = config.get("max_new_tokens", DEFAULT_MAX_NEW_TOKENS)
     except FileNotFoundError:
         max_seq_length = DEFAULT_MAX_SEQ_LENGTH
+        max_new_tokens = DEFAULT_MAX_NEW_TOKENS
 
-    # Command-line override wins over config.json.
+    # Command-line overrides win over config.json.
     if args.context is not None:
         max_seq_length = args.context
+    if args.max_new_tokens is not None:
+        max_new_tokens = args.max_new_tokens
 
     # No hard ceiling: Llama-3.1 is native to 128k, so quality doesn't degrade.
     # The real constraint is VRAM (KV cache), so we only warn about likely OOM.
@@ -303,7 +311,13 @@ def main():
         print(f"\n[!] WARNING: context {max_seq_length} is large — the KV cache grows ~128 KB/token,")
         print(f"    so anything above ~{VRAM_WARN_SEQ_LENGTH} risks CUDA out-of-memory on a 16 GB GPU. Watch VRAM.")
 
-    log(f"using max_seq_length: {max_seq_length} | input format: {args.format}")
+    # max_new_tokens is reserved from the context budget, so it must leave room for input.
+    if max_new_tokens >= max_seq_length:
+        print(f"\n[-] ERROR: max_new_tokens ({max_new_tokens}) must be smaller than the context ({max_seq_length}); "
+              f"nothing would be left for the subtitles.")
+        sys.exit(1)
+
+    log(f"using max_seq_length: {max_seq_length} | max_new_tokens: {max_new_tokens} | input format: {args.format}")
 
     # Model settings
     dtype = None
@@ -336,7 +350,8 @@ def main():
             continue
 
         try:
-            if generate_notes(srt_file, model, tokenizer, max_seq_length, force=args.force, fmt=args.format):
+            if generate_notes(srt_file, model, tokenizer, max_seq_length, force=args.force,
+                               fmt=args.format, max_new_tokens=max_new_tokens):
                 succeeded += 1
             else:
                 failed.append(srt_file)

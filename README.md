@@ -78,6 +78,7 @@ srt2anki-batch /path/to/folder       # all .srt in a given directory
 | positional | file paths (`srt2anki`) or a directory (`srt2anki-batch`) | — | What to process. `srt2anki-batch` with no path uses the current directory. |
 | `--format` | `srt` \| `txt` | `srt` | **`srt`**: feeds raw subtitles; timecode-aware prompt (model can flag unclear moments as `⚠️ [... @ <TIMECODE>]`). **`txt`**: flattens the file first (removes indices, timecodes, HTML tags), giving far fewer splits, and uses a prompt that never mentions timecodes. |
 | `--context N` | integer | value from `config.json` (16384) | Overrides context length for this run only. No hard ceiling — a very large value only prints a VRAM warning; see [Context & limits](#context--limits). |
+| `--max-new-tokens N` | integer | value from `config.json` (2000) | Caps how many tokens the model generates per part (response length). **Higher** = more detailed notes/more cards, but slower and eats more context budget; **lower** = faster. Must be smaller than the context. |
 | `--force` | flag | off | Regenerate even if outputs exist. Without it, a file whose `_notes.md` **and** `.apkg` already exist is skipped (great for resuming an interrupted batch). |
 | `--recursive`, `-r` | flag | off | **`srt2anki-batch` only.** Also scan subfolders for `.srt` files, not just the top level. |
 
@@ -137,13 +138,16 @@ The base model (**Llama-3.1-8B**) is native to **128k tokens**, so there is **no
 - **Default:** `16384` (set in `config.json`). Comfortable on a 16 GB GPU.
 - **No hard ceiling.** A large `--context`/`config.json` value is allowed; above ~32768 the script only prints a **VRAM warning** (CUDA out-of-memory becomes likely on 16 GB). Nothing is blocked.
 
-Edit `config.json` to change the default:
+Edit `config.json` to change the defaults:
 
 ```json
 {
-    "max_seq_length": 16384
+    "max_seq_length": 16384,
+    "max_new_tokens": 2000
 }
 ```
+
+`max_new_tokens` is the cap on generated tokens per part (the answer length), reserved from the context budget — so the subtitles for one part must fit in `max_seq_length − max_new_tokens`. Raise it for longer, more detailed notes (slower); lower it for speed. Override per-run with `--max-new-tokens`.
 
 **Approximate limits on a 16 GB GPU (4-bit weights ~6 GB):**
 - **16384 (default):** ~2 GB KV cache — comfortable.
